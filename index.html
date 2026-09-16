@@ -1,0 +1,139 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>حساب مشتریان آنلاین</title>
+<style>body{font-family:Arial,sans-serif;background:#f4f6fa;margin:0;color:#172033}header{background:#172033;color:white;padding:16px}main{max-width:900px;margin:auto;padding:16px}nav{display:flex;gap:8px;overflow:auto;background:white;padding:10px}button{padding:10px 14px;border:0;border-radius:9px;cursor:pointer}.primary{background:#2563eb;color:white}.page{display:none}.active{display:block}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card,form,table{background:white;padding:15px;border-radius:12px;margin:10px 0}.card b{font-size:20px;display:block;margin-top:7px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}label{display:block;font-size:13px;margin-bottom:4px}input,select,textarea{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box}textarea{min-height:70px}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #eee;text-align:right;font-size:13px}.login{max-width:380px;margin:60px auto;padding:20px}.hidden{display:none}@media(max-width:650px){.cards,.grid{grid-template-columns:1fr}}</style></head><body>
+<div id="login" class="login"><h2>ورود به سیستم</h2><form onsubmit="loginUser(event)"><label>ایمیل</label><input id="email" type="email" required><br><label>رمز عبور</label><input id="password" type="password" required><br><button class="primary">ورود</button><p id="err"></p></form></div>
+<div id="app" class="hidden"><header><h2>حساب مشتریان</h2><small>AFN / TOMAN — آنلاین</small></header><nav><button onclick="show('home',this)">داشبورد</button><button onclick="show('customers',this)">مشتریان</button><button onclick="show('tx',this)">ثبت معامله</button><button onclick="show('report',this)">گزارش</button><button onclick="logout()">خروج</button></nav><main>
+<section id="home" class="page"><h2>داشبورد</h2><div class="cards"><div class="card">مشتریان<b id="cc">0</b></div><div class="card">مانده AFN<b id="afn">0</b></div><div class="card">مانده TOMAN<b id="irr">0</b></div></div><h3>آخرین معاملات</h3><div id="recent"></div></section>
+<section id="customers" class="page"><h2>مشتریان</h2><input id="search" placeholder="جستجوی نام یا شماره" oninput="render()"><form onsubmit="addCustomer(event)"><div class="grid"><div><label>نام</label><input id="name" required></div><div><label>شماره تماس</label><input id="phone"></div></div><label>یادداشت</label><textarea id="note"></textarea><button type="submit" class="primary">افزودن مشتری</button></form><div id="list"></div></section>
+<section id="tx" class="page"><h2>ثبت معامله</h2><form onsubmit="addTx(event)"><div class="grid">
+<div><label>مشتری</label><select id="customer"></select></div>
+<div><label>نوع</label><select id="type"><option value="receive">دریافت از مشتری</option><option value="pay">پرداخت به مشتری</option></select></div>
+<div><label>ارز معامله</label><select id="currency" onchange="calcEquivalent()"><option value="AFN">افغانی AFN</option><option value="TOMAN">تومان</option></select></div>
+<div><label>مبلغ</label><input id="amount" type="number" step="any" min="0.01" required oninput="calcEquivalent()"></div>
+<div><label>نرخ تبدیل</label><input id="rateAfn" type="number" step="any" min="0.000001" placeholder="مثلاً 280" oninput="calcEquivalent()"></div>
+<div><label>مبلغ معادل</label><input id="equivalent" readonly placeholder="خودکار محاسبه می‌شود"></div>
+</div>
+<div id="rateHelp" class="card" style="padding:10px;margin:8px 0">قاعده نرخ: ۱ AFN = X تومان. اگر ارز معامله AFN باشد، مبلغ × نرخ؛ اگر TOMAN باشد، مبلغ ÷ نرخ.</div>
+<label>شرح</label><textarea id="desc"></textarea><button type="submit" class="primary">ثبت معامله</button></form></section>
+<section id="detail" class="page"><h2>حساب مشتری</h2><div id="customerDetail"></div></section>
+
+
+
+<section id="report" class="page"><h2>گزارش</h2><div id="reportBox"></div></section></main></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
+const sb=window.supabase.createClient('https://oeqvvuvtduxylqlmqpka.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcXZ2dXZ0ZHV4eWxxbG1xcGthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0Nzg2ODksImV4cCI6MjEwNTA1NDY4OX0.G3fKClGqvchB3pl22cR_JxlybtjIok_uAp8o5vMCw0o');let C=[],T=[];
+const f=n=>Number(n||0).toLocaleString('en-US',{maximumFractionDigits:2});
+async function init(){let {data}=await sb.auth.getSession();data.session?open():login()}
+function login(){document.getElementById('login').classList.remove('hidden');document.getElementById('app').classList.add('hidden')}
+function open(){document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');applyRate();load()}
+async function loginUser(e){e.preventDefault();let {error}=await sb.auth.signInWithPassword({email:email.value,password:password.value});if(error)err.textContent=error.message;else open()}
+async function logout(){await sb.auth.signOut();login()}
+async function load(){let c=await sb.from('customers').select('*').order('created_at',{ascending:false});let t=await sb.from('transactions').select('*').order('created_at',{ascending:false});if(c.error||t.error)alert((c.error||t.error).message);C=c.data||[];T=t.data||[];render()}
+function show(id,b){document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');render()}
+async function addCustomer(e){
+ e.preventDefault();
+ const nameEl=document.getElementById('name');
+ const phoneEl=document.getElementById('phone');
+ const noteEl=document.getElementById('note');
+ const btn=e.submitter;
+ if(btn) btn.disabled=true;
+ try{
+   const session=await sb.auth.getSession();
+   if(!session.data.session){ alert('جلسه ورود شما منقضی شده است. دوباره وارد شوید.'); login(); return; }
+   const row={name:nameEl.value.trim(),phone:phoneEl.value.trim(),note:noteEl.value.trim()};
+   if(!row.name){ alert('نام مشتری را وارد کنید.'); return; }
+   const r=await sb.from('customers').insert(row);
+   if(r.error){ alert('خطا در ثبت مشتری: '+r.error.message); return; }
+   e.target.reset();
+   await load();
+   alert('مشتری با موفقیت ثبت شد.');
+ }catch(err){
+   alert('خطای غیرمنتظره: '+(err?.message||err));
+ }finally{
+   if(btn) btn.disabled=false;
+ }
+}
+function bal(id){let a=0,i=0;T.filter(x=>x.customer_id===id).forEach(x=>{let s=x.transaction_type==='receive'?1:-1;x.currency==='AFN'?a+=s*Number(x.amount):i+=s*Number(x.amount)});return[a,i]}
+
+const DEFAULT_RATE={afn:280};
+function getRate(){return {afn:Number(localStorage.getItem('afn_per_million_toman')||DEFAULT_RATE.afn)}}
+function applyRate(){
+ const r=getRate();
+ const ra=document.getElementById('rateAfn');
+ if(ra) ra.value=r.afn;
+ calcEquivalent();
+}
+function saveRateInline(){ 
+ const r=Number(document.getElementById('rateAfn').value);
+ if(!r||r<=0)return alert('نرخ تبدیل را درست وارد کنید.');
+ localStorage.setItem('afn_per_million_toman',r);
+ calcEquivalent();
+}
+function calcEquivalent(){
+ const a=Number(document.getElementById('amount').value||0);
+ const r=Number(document.getElementById('rateAfn').value||0);
+ const cur=document.getElementById('currency').value;
+ const out=document.getElementById('equivalent');
+ if(!a||!r){out.value='';return;}
+ const eq=cur==='AFN' ? a*(1000000/r) : a*(r/1000000);
+ out.value=(Number.isFinite(eq)?eq.toLocaleString('en-US',{maximumFractionDigits:2}):'')+(cur==='AFN'?' تومان':' AFN');
+}
+async function addTx(e){
+ e.preventDefault();
+ const customerEl=document.getElementById('customer');
+ const typeEl=document.getElementById('type');
+ const currencyEl=document.getElementById('currency');
+ const amountEl=document.getElementById('amount');
+ const rateEl=document.getElementById('rateAfn');
+ const descEl=document.getElementById('desc');
+ const a=Number(amountEl.value), r=Number(rateEl.value);
+
+ if(!customerEl.value)return alert('مشتری را انتخاب کنید.');
+ if(!a || a<=0)return alert('مبلغ را درست وارد کنید.');
+ if(!r || r<=0)return alert('نرخ تبدیل را درست وارد کنید.');
+
+ const cur=currencyEl.value;
+ const eq=cur==='AFN' ? a*(1000000/r) : a*(r/1000000);
+
+ // Insert only the original/known columns first so missing optional columns
+ // cannot prevent saving the transaction.
+ const baseRow={
+   customer_id:customerEl.value,
+   transaction_type:typeEl.value,
+   currency:cur,
+   amount:a,
+   exchange_rate:r,
+   description:descEl.value.trim()
+ };
+ const result=await sb.from('transactions').insert(baseRow);
+
+ if(result.error){
+   return alert('معامله ذخیره نشد: '+result.error.message);
+ }
+
+ // Optional fields are attempted separately; if they do not exist,
+ // the main transaction is already safely saved.
+ const {data:latest}=await sb.from('transactions')
+   .select('id')
+   .eq('customer_id',customerEl.value)
+   .eq('amount',a)
+   .eq('exchange_rate',r)
+   .order('created_at',{ascending:false})
+   .limit(1);
+
+ if(latest && latest[0]){
+   await sb.from('transactions').update({
+     equivalent_amount:eq,
+     equivalent_currency:cur==='AFN'?'TOMAN':'AFN'
+   }).eq('id',latest[0].id);
+ }
+
+ localStorage.setItem('afn_per_million_toman',r);
+ e.target.reset();
+ applyRate();
+ await load();
+ alert('معامله با موفقیت ذخیره شد.');
+}
+
+function render(){cc.textContent=C.length;let A=0,I=0;C.forEach(c=>{let b=bal(c.id);A+=b[0];I+=b[1]});afn.textContent=f(A)+' AFN';irr.textContent=f(I)+' TOMAN';let q=(document.getElementById('search')?.value||'').toLowerCase();list.innerHTML=C.filter(c=>c.name.toLowerCase().includes(q)||(c.phone||'').includes(q)).map(c=>{let b=bal(c.id);return `<div class="card"><b>${c.name}</b>${c.phone||''}<br>AFN: ${f(b[0])} | TOMAN: ${f(b[1])}<br><button onclick="openCustomer('${c.id}')">مشاهده حساب</button></div>`}).join('')||'<div class="card">مشتری موجود نیست.</div>';customer.innerHTML=C.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');let rows=T.map(t=>{let c=C.find(x=>x.id===t.customer_id);return `<tr><td>${new Date(t.created_at).toLocaleDateString('fa-IR')}</td><td>${c?.name||''}</td><td>${t.transaction_type==='receive'?'دریافت':'پرداخت'}</td><td>${f(t.amount)} ${t.currency}</td><td>${t.exchange_rate?f(t.exchange_rate):'-'}</td></tr>`}).join('');recent.innerHTML=rows?`<table><tr><th>تاریخ</th><th>مشتری</th><th>نوع</th><th>مبلغ</th><th>نرخ</th><th>معادل</th></tr>${rows}</table>`:'معامله‌ای نیست';reportBox.innerHTML=rows?`<table><tr><th>تاریخ</th><th>مشتری</th><th>نوع</th><th>مبلغ</th><th>نرخ</th><th>معادل</th></tr>${rows}</table>`:'گزارشی نیست'}
+sb.auth.onAuthStateChange((e,s)=>s?open():login());init();
+</script></body></html>
